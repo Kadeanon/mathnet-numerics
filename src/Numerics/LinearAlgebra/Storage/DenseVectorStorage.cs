@@ -37,7 +37,7 @@ namespace MathNet.Numerics.LinearAlgebra.Storage
 {
     [Serializable]
     [DataContract(Namespace = "urn:MathNet/Numerics/LinearAlgebra")]
-    public class DenseVectorStorage<T> : VectorStorage<T>
+    public partial class DenseVectorStorage<T> : VectorStorage<T>
         where T : struct, IEquatable<T>, IFormattable
     {
         // [ruegg] public fields are OK here
@@ -89,7 +89,21 @@ namespace MathNet.Numerics.LinearAlgebra.Storage
         }
 
         // CLEARING
+#if NET5_0_OR_GREATER
 
+        public Span<T> Span => Data.AsSpan();
+
+        public override void Clear()
+        {
+            Span.Clear();
+        }
+
+        public override void Clear(int index, int count)
+        {
+            Span.Slice(index, count).Clear();
+        }
+
+#else
         public override void Clear()
         {
             Array.Clear(Data, 0, Data.Length);
@@ -99,7 +113,7 @@ namespace MathNet.Numerics.LinearAlgebra.Storage
         {
             Array.Clear(Data, index, count);
         }
-
+#endif
         // INITIALIZATION
 
         public static DenseVectorStorage<T> OfVector(VectorStorage<T> vector)
@@ -195,6 +209,138 @@ namespace MathNet.Numerics.LinearAlgebra.Storage
 
         // VECTOR COPY
 
+#if NET5_0_OR_GREATER
+
+        internal override void CopyToUnchecked(VectorStorage<T> target, ExistingData existingData)
+        {
+
+            var sourceSpan = Span;
+
+            if (target is DenseVectorStorage<T> denseTarget)
+            {
+                if (!ReferenceEquals(this, denseTarget))
+                {
+                    var tartegtSpan = denseTarget.Span;
+                    sourceSpan.TryCopyTo(tartegtSpan);
+                    return;
+                }
+            }
+            else
+            {
+                var i = 0;
+                foreach (var value in sourceSpan)
+                {
+                    target.At(i, value);
+                    i++;
+                }
+            }
+        }
+
+        internal override void CopyToColumnUnchecked(MatrixStorage<T> target, int columnIndex, ExistingData existingData)
+        {
+            var data = Span;
+            if (target is DenseColumnMajorMatrixStorage<T> denseTarget)
+            {
+                var step = denseTarget.RowCount;
+                var targetSpan = denseTarget.Data.AsSpan().Slice(columnIndex * step, denseTarget.RowCount);
+                data.CopyTo(targetSpan);
+                return;
+            }
+
+            // FALL BACK
+            var i = 0;
+            foreach (var value in Span)
+            {
+                target.At(i, columnIndex, value);
+                i++;
+            }
+        }
+
+        internal override void CopyToRowUnchecked(MatrixStorage<T> target, int rowIndex, ExistingData existingData)
+        {
+            var data = Span;
+            if (target is DenseColumnMajorMatrixStorage<T> denseTarget)
+            {
+                var step = target.RowCount;
+                var targetData = denseTarget.Data.AsSpan().Slice(rowIndex, step * target.ColumnCount - step + 1);
+                var index = 0;
+                foreach (var value in data)
+                {
+                    targetData[index * step] = value;
+                    index++;
+                }
+                return;
+            }
+
+            // FALL BACK
+            var i = 0;
+            foreach (var value in Span)
+            {
+                target.At(rowIndex, i, value);
+                i++;
+            }
+        }
+
+        internal override void CopySubVectorToUnchecked(VectorStorage<T> target, int sourceIndex, int targetIndex, int count, ExistingData existingData)
+        {
+            if (target is DenseVectorStorage<T> denseTarget)
+            {
+                var sourceSpan = Span.Slice(sourceIndex, count);
+                var tartegtSpan = denseTarget.Span.Slice(targetIndex, count);
+                sourceSpan.TryCopyTo(tartegtSpan);
+            }
+            else
+            {
+                base.CopySubVectorToUnchecked(target, sourceIndex, targetIndex, count, existingData);
+            }
+        }
+
+        internal override void CopyToSubColumnUnchecked(MatrixStorage<T> target, int columnIndex, int sourceRowIndex, int targetRowIndex, int rowCount, ExistingData existingData)
+        {
+            var data = Span.Slice(sourceRowIndex, rowCount);
+
+            if (target is DenseColumnMajorMatrixStorage<T> denseTarget)
+            {
+                var targetSpan = denseTarget.Data.AsSpan().Slice(columnIndex * denseTarget.RowCount + targetRowIndex, rowCount);
+                data.CopyTo(targetSpan);
+                return;
+            }
+
+            // FALL BACK
+            var i = targetRowIndex;
+            foreach (var value in Span)
+            {
+                target.At(i, columnIndex, value);
+                i++;
+            }
+        }
+
+        internal override void CopyToSubRowUnchecked(MatrixStorage<T> target, int rowIndex, int sourceColumnIndex, int targetColumnIndex, int columnCount, ExistingData existingData)
+        {
+
+            var data = Span.Slice(sourceColumnIndex, columnCount);
+            var index = 0;
+            if (target is DenseColumnMajorMatrixStorage<T> denseTarget)
+            {
+                var step = target.RowCount;
+                var targetData = denseTarget.Data.AsSpan().Slice(rowIndex + targetColumnIndex * step, columnCount * step - step + 1);
+                foreach (var value in data)
+                {
+                    targetData[index * step] = value;
+                    index++;
+                }
+                return;
+            }
+
+            // FALL BACK
+            index = targetColumnIndex;
+            foreach (var value in data)
+            {
+                target.At(rowIndex, index, value);
+                index++;
+            }
+        }
+#else
         internal override void CopyToUnchecked(VectorStorage<T> target, ExistingData existingData)
         {
             var data = Data;
@@ -343,7 +489,7 @@ namespace MathNet.Numerics.LinearAlgebra.Storage
                 target.At(ii, columnIndex, data[i]);
             }
         }
-
+#endif
         // EXTRACT
 
         public override T[] ToArray()
