@@ -47,16 +47,11 @@ namespace MathNet.Numerics
         /// formatting information.
         /// </param>
         /// <returns>A <see cref="CultureInfo"/> instance.</returns>
-        internal static CultureInfo GetCultureInfo(this IFormatProvider formatProvider)
+        internal static CultureInfo GetCultureInfo(this IFormatProvider? formatProvider)
         {
-            if (formatProvider == null)
-            {
-                return CultureInfo.CurrentCulture;
-            }
-
-            return (formatProvider as CultureInfo)
-                ?? (formatProvider.GetFormat(typeof (CultureInfo)) as CultureInfo)
-                    ?? CultureInfo.CurrentCulture;
+            return formatProvider as CultureInfo ??
+                     formatProvider?.GetFormat(typeof(CultureInfo)) as CultureInfo ??
+                CultureInfo.CurrentCulture;
         }
 
         /// <summary>
@@ -68,7 +63,7 @@ namespace MathNet.Numerics
         /// formatting information.
         /// </param>
         /// <returns>A <see cref="NumberFormatInfo"/> instance.</returns>
-        internal static NumberFormatInfo GetNumberFormatInfo(this IFormatProvider formatProvider)
+        internal static NumberFormatInfo GetNumberFormatInfo(this IFormatProvider? formatProvider)
         {
             return NumberFormatInfo.GetInstance(formatProvider);
         }
@@ -81,14 +76,9 @@ namespace MathNet.Numerics
         /// formatting information.
         /// </param>
         /// <returns>A <see cref="TextInfo"/> instance.</returns>
-        internal static TextInfo GetTextInfo(this IFormatProvider formatProvider)
+        internal static TextInfo GetTextInfo(this IFormatProvider? formatProvider)
         {
-            if (formatProvider == null)
-            {
-                return CultureInfo.CurrentCulture.TextInfo;
-            }
-
-            return (formatProvider.GetFormat(typeof (TextInfo)) as TextInfo)
+            return (formatProvider?.GetFormat(typeof (TextInfo)) as TextInfo)
                 ?? GetCultureInfo(formatProvider).TextInfo;
         }
 

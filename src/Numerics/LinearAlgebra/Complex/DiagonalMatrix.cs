@@ -711,14 +711,14 @@ namespace MathNet.Numerics.LinearAlgebra.Complex
         /// equal Min(Rows, Columns).</exception>
         /// <remarks>For non-square matrices, the elements of <paramref name="source"/> are copied to
         /// this[i,i].</remarks>
-        public override void SetDiagonal(Complex[] source)
+        public override void SetDiagonal(ReadOnlySpan<Complex> source)
         {
             if (source.Length != _data.Length)
             {
                 throw new ArgumentException("The array arguments must have the same length.", nameof(source));
             }
 
-            Array.Copy(source, 0, _data, 0, source.Length);
+            source.CopyTo(_data);
         }
 
         /// <summary>

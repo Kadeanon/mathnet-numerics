@@ -568,14 +568,13 @@ namespace MathNet.Numerics.LinearAlgebra.Double
         /// equal Min(Rows, Columns).</exception>
         /// <remarks>For non-square matrices, the elements of <paramref name="source"/> are copied to
         /// this[i,i].</remarks>
-        public override void SetDiagonal(double[] source)
+        public override void SetDiagonal(ReadOnlySpan<double> source)
         {
             if (source.Length != _data.Length)
             {
                 throw new ArgumentException("The array arguments must have the same length.", nameof(source));
             }
-
-            Buffer.BlockCopy(source, 0, _data, 0, source.Length * Constants.SizeOfDouble);
+            source.CopyTo(_data);
         }
 
         /// <summary>

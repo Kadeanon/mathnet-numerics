@@ -969,7 +969,7 @@ namespace MathNet.Numerics.LinearAlgebra
         /// equal Min(Rows, Columns).</exception>
         /// <remarks>For non-square matrices, the elements of <paramref name="source"/> are copied to
         /// this[i,i].</remarks>
-        public virtual void SetDiagonal(T[] source)
+        public virtual void SetDiagonal(ReadOnlySpan<T> source)
         {
             if (source == null)
             {
@@ -983,9 +983,11 @@ namespace MathNet.Numerics.LinearAlgebra
                 throw new ArgumentException("The array arguments must have the same length.", nameof(source));
             }
 
-            for (var i = 0; i < min; i++)
+            var i = 0;
+            foreach(var value in source)
             {
-                At(i, i, source[i]);
+                At(i, i, value);
+                i++;
             }
         }
 

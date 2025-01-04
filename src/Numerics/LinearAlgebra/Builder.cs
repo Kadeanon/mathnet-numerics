@@ -761,7 +761,7 @@ namespace MathNet.Numerics.LinearAlgebra
         /// This new matrix will be independent from the array.
         /// A new memory block will be allocated for storing the matrix.
         /// </summary>
-        public Matrix<T> DenseOfDiagonalArray(T[] diagonal)
+        public Matrix<T> DenseOfDiagonalArray(Span<T> diagonal)
         {
             var m = Dense(diagonal.Length, diagonal.Length);
             m.SetDiagonal(diagonal);

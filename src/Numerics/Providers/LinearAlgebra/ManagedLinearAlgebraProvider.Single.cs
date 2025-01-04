@@ -32,6 +32,7 @@ using MathNet.Numerics.Threading;
 using Complex = System.Numerics.Complex;
 using QRMethod = MathNet.Numerics.LinearAlgebra.Factorization.QRMethod;
 using static System.FormattableString;
+using System.Collections.Generic;
 
 namespace MathNet.Numerics.Providers.LinearAlgebra
 {
@@ -64,23 +65,61 @@ namespace MathNet.Numerics.Providers.LinearAlgebra
             {
                 throw new ArgumentException("All vectors must have the same dimensionality.");
             }
+            if(result.Length < x.Length)
+            {
+                throw new ArgumentException("Result vector must have at least the same length as the input vectors.");
+            }
+
+            ReadOnlySpan<float> ySpan = y;
+            ReadOnlySpan<float> xSpan = x;
+            Span<float> resultSpan = result;
 
             if (alpha == 0.0)
             {
-                y.Copy(result);
+                ySpan.CopyTo(resultSpan);
             }
             else if (alpha == 1.0)
             {
-                for (int i = 0; i < result.Length; i++)
+                int i = 0;
+                // i dont know how to check it in .net 6 orz
+#if NET7_0_OR_GREATER
+                if (System.Numerics.Vector<float>.IsSupported)
                 {
-                    result[i] = y[i] + x[i];
+                    int vectorLength = System.Numerics.Vector<float>.Count;
+                    for (; i <= y.Length - vectorLength; i += vectorLength)
+                    {
+                        var yVector = new System.Numerics.Vector<float>(ySpan.Slice(i, vectorLength));
+                        var xVector = new System.Numerics.Vector<float>(xSpan.Slice(i, vectorLength));
+                        var resultVector = yVector + xVector;
+                        resultVector.CopyTo(resultSpan.Slice(i, vectorLength));
+                    }
+                }
+#endif
+                for (; i < result.Length; i++)
+                {
+                    resultSpan[i] = ySpan[i] + xSpan[i];
                 }
             }
             else
             {
-                for (int i = 0; i < result.Length; i++)
+                int i = 0;
+#if NET7_0_OR_GREATER
+                if (System.Numerics.Vector<float>.IsSupported)
                 {
-                    result[i] = y[i] + (alpha * x[i]);
+                    int vectorLength = System.Numerics.Vector<float>.Count;
+                    for (; i <= y.Length - vectorLength; i += vectorLength)
+                    {
+                        var yVector = new System.Numerics.Vector<float>(ySpan.Slice(i, vectorLength));
+                        var xVector = new System.Numerics.Vector<float>(xSpan.Slice(i, vectorLength));
+                        xVector *= alpha;
+                        System.Numerics.Vector<float> resultVector = yVector + xVector;
+                        resultVector.CopyTo(resultSpan.Slice(i, vectorLength));
+                    }
+                }
+#endif
+                for (; i < result.Length; i++)
+                {
+                    resultSpan[i] = ySpan[i] + (alpha * xSpan[i]);
                 }
             }
         }
@@ -94,24 +133,44 @@ namespace MathNet.Numerics.Providers.LinearAlgebra
         /// <remarks>This is similar to the SCAL BLAS routine.</remarks>
         public void ScaleArray(float alpha, float[] x, float[] result)
         {
-            if (x == null)
-            {
-                throw new ArgumentNullException(nameof(x));
-            }
 
+            ReadOnlySpan<float> xSpan = x;
+            Span<float> resultSpan = result;
+
+            if (result.Length < x.Length)
+            {
+                throw new ArgumentException("Result vector must have at least the same length as the input vectors.");
+            }
+            else if(result.Length > x.Length)
+            {
+                resultSpan = resultSpan.Slice(0, x.Length);
+            }
             if (alpha == 0.0)
             {
-                Array.Clear(result, 0, result.Length);
+                resultSpan.Clear();
             }
             else if (alpha == 1.0)
             {
-                x.Copy(result);
+                xSpan.CopyTo(resultSpan);
             }
             else
             {
-                for (int i = 0; i < result.Length; i++)
+                int i = 0;
+#if NET7_0_OR_GREATER
+                if (System.Numerics.Vector<float>.IsSupported)
                 {
-                    result[i] = alpha * x[i];
+                    int vectorLength = System.Numerics.Vector<float>.Count;
+                    for (; i <= x.Length - vectorLength; i += vectorLength)
+                    {
+                        var xVector = new System.Numerics.Vector<float>(xSpan.Slice(i, vectorLength));
+                        xVector *= alpha;
+                        xVector.CopyTo(resultSpan.Slice(i, vectorLength));
+                    }
+                }
+#endif
+                for (; i < result.Length; i++)
+                {
+                    resultSpan[i] = alpha * xSpan[i];
                 }
             }
         }
@@ -158,8 +217,24 @@ namespace MathNet.Numerics.Providers.LinearAlgebra
                 throw new ArgumentException("All vectors must have the same dimensionality.");
             }
 
+            ReadOnlySpan<float> xSpan = x;
+            ReadOnlySpan<float> ySpan = y;
+            
             float sum = 0.0f;
-            for (var index = 0; index < y.Length; index++)
+            var index = 0;
+#if NET7_0_OR_GREATER
+            if (System.Numerics.Vector<float>.IsSupported)
+            {
+                int vectorLength = System.Numerics.Vector<float>.Count;
+                for (; index <= x.Length - vectorLength; index += vectorLength)
+                {
+                    var xVector = new System.Numerics.Vector<float>(xSpan.Slice(index, vectorLength));
+                    var yVector = new System.Numerics.Vector<float>(ySpan.Slice(index, vectorLength));
+                    sum += System.Numerics.Vector.Dot(xVector, yVector);
+                }
+            }
+#endif
+            for (; index < y.Length; index++)
             {
                 sum += y[index]*x[index];
             }
@@ -199,7 +274,27 @@ namespace MathNet.Numerics.Providers.LinearAlgebra
                 throw new ArgumentException("All vectors must have the same dimensionality.");
             }
 
-            for (int i = 0; i < result.Length; i++)
+            ReadOnlySpan<float> xSpan = x;
+            ReadOnlySpan<float> ySpan = y;
+            Span<float> resultSpan = result;
+
+            int i = 0;
+
+#if NET7_0_OR_GREATER
+            if (System.Numerics.Vector<float>.IsSupported)
+            {
+                int vectorLength = System.Numerics.Vector<float>.Count;
+                for (; i <= x.Length - vectorLength; i += vectorLength)
+                {
+                    var xVector = new System.Numerics.Vector<float>(xSpan.Slice(i, vectorLength));
+                    var yVector = new System.Numerics.Vector<float>(ySpan.Slice(i, vectorLength));
+                    var resultVector = xVector + yVector;
+                    resultVector.CopyTo(resultSpan.Slice(i, vectorLength));
+                }
+            }
+#endif
+
+            for (; i < result.Length; i++)
             {
                 result[i] = x[i] + y[i];
             }
@@ -237,7 +332,27 @@ namespace MathNet.Numerics.Providers.LinearAlgebra
                 throw new ArgumentException("All vectors must have the same dimensionality.");
             }
 
-            for (int i = 0; i < result.Length; i++)
+            ReadOnlySpan<float> xSpan = x;
+            ReadOnlySpan<float> ySpan = y;
+            Span<float> resultSpan = result;
+
+            int i = 0;
+
+#if NET7_0_OR_GREATER
+            if (System.Numerics.Vector<float>.IsSupported)
+            {
+                int vectorLength = System.Numerics.Vector<float>.Count;
+                for (; i <= x.Length - vectorLength; i += vectorLength)
+                {
+                    var xVector = new System.Numerics.Vector<float>(xSpan.Slice(i, vectorLength));
+                    var yVector = new System.Numerics.Vector<float>(ySpan.Slice(i, vectorLength));
+                    var resultVector = xVector - yVector;
+                    resultVector.CopyTo(resultSpan.Slice(i, vectorLength));
+                }
+            }
+#endif
+
+            for (; i < result.Length; i++)
             {
                 result[i] = x[i] - y[i];
             }
@@ -275,7 +390,26 @@ namespace MathNet.Numerics.Providers.LinearAlgebra
                 throw new ArgumentException("All vectors must have the same dimensionality.");
             }
 
-            for (int i = 0; i < result.Length; i++)
+            ReadOnlySpan<float> xSpan = x;
+            ReadOnlySpan<float> ySpan = y;
+            Span<float> resultSpan = result;
+
+            int i = 0;
+#if NET7_0_OR_GREATER
+            if (System.Numerics.Vector<float>.IsSupported)
+            {
+                int vectorLength = System.Numerics.Vector<float>.Count;
+                for (; i <= x.Length - vectorLength; i += vectorLength)
+                {
+                    var xVector = new System.Numerics.Vector<float>(xSpan.Slice(i, vectorLength));
+                    var yVector = new System.Numerics.Vector<float>(ySpan.Slice(i, vectorLength));
+                    var resultVector = xVector * yVector;
+                    resultVector.CopyTo(resultSpan.Slice(i, vectorLength));
+                }
+            }
+#endif
+
+            for (; i < result.Length; i++)
             {
                 result[i] = x[i] * y[i];
             }
@@ -315,7 +449,27 @@ namespace MathNet.Numerics.Providers.LinearAlgebra
 
             CommonParallel.For(0, y.Length, 4096, (a, b) =>
             {
-                for (int i = a; i < b; i++)
+                int length = b - a;
+                ReadOnlySpan<float> xSpan = x.AsSpan(a, length);
+                ReadOnlySpan<float> ySpan = y.AsSpan(a, length);
+                Span<float> resultSpan = result.AsSpan(a, length);
+
+                int i = 0;
+#if NET7_0_OR_GREATER
+                if (System.Numerics.Vector<float>.IsSupported)
+                {
+                    int vectorLength = System.Numerics.Vector<float>.Count;
+                    for (; i <= length - vectorLength; i += vectorLength)
+                    {
+                        var xVector = new System.Numerics.Vector<float>(xSpan.Slice(i, vectorLength));
+                        var yVector = new System.Numerics.Vector<float>(ySpan.Slice(i, vectorLength));
+                        var resultVector = xVector / yVector;
+                        resultVector.CopyTo(resultSpan.Slice(i, vectorLength));
+                    }
+                }
+#endif
+
+                for (; i < length; i++)
                 {
                     result[i] = x[i] / y[i];
                 }
@@ -356,9 +510,20 @@ namespace MathNet.Numerics.Providers.LinearAlgebra
 
             CommonParallel.For(0, y.Length, 4096, (a, b) =>
             {
-                for (int i = a; i < b; i++)
+                int length = b - a;
+                ReadOnlySpan<float> xSpan = x.AsSpan(a, length);
+                ReadOnlySpan<float> ySpan = y.AsSpan(a, length);
+                Span<float> resultSpan = result.AsSpan(a, length);
+
+                int i = 0;
+
+                for (; i < length; i++)
                 {
+#if NET6_0_OR_GREATER
+                    result[i] = MathF.Pow(x[i], y[i]);
+#else
                     result[i] = (float)Math.Pow(x[i], y[i]);
+#endif
                 }
             });
         }

@@ -62,7 +62,14 @@ namespace MathNet.Numerics.LinearAlgebra.Double.Factorization
             var s = new DenseVector(nm);
             var u = new DenseMatrix(matrix.RowCount);
             var vt = new DenseMatrix(matrix.ColumnCount);
-            LinearAlgebraControl.Provider.SingularValueDecomposition(computeVectors, ((DenseMatrix) matrix.Clone()).Values, matrix.RowCount, matrix.ColumnCount, s.Values, u.Values, vt.Values);
+            LinearAlgebraControl.Provider.SingularValueDecomposition(
+                computeVectors,
+                ((DenseMatrix) matrix.Clone()).Values,
+                matrix.RowCount,
+                matrix.ColumnCount,
+                s.Values,
+                u.Values,
+                vt.Values);
 
             return new DenseSvd(s, u, vt, computeVectors);
         }
