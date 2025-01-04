@@ -1,4 +1,4 @@
-// <copyright file="Complex32.cs" company="Math.NET">
+// <copyright file="Complex32.cs" company="MathF.NET">
 // Math.NET Numerics, part of the Math.NET Project
 // http://numerics.mathdotnet.com
 // http://github.com/mathnet/mathnet-numerics
@@ -35,8 +35,8 @@ using System.Runtime.Serialization;
 using Complex = System.Numerics.Complex;
 using BigInteger = System.Numerics.BigInteger;
 using System.Runtime;
-using System.Numerics;
 using System.Diagnostics.CodeAnalysis;
+using System.Numerics;
 
 namespace MathNet.Numerics
 {
@@ -69,15 +69,28 @@ namespace MathNet.Numerics
     [Serializable]
     [StructLayout(LayoutKind.Sequential)]
     [DataContract(Namespace = "urn:MathNet/Numerics")]
-    public readonly struct Complex32 :
-        IFormattable
-        , IEquatable<Complex32>
+    public readonly partial struct Complex32 : IFormattable, IEquatable<Complex32>
 #if NET7_0_OR_GREATER
-        , INumberBase<Complex32>
-        , ISignedNumber<Complex32>
+      , INumberBase<Complex32>
 #endif
     {
-        public System.Numerics.Complex ToNumericsComplex() => new System.Numerics.Complex(Real, Imaginary);
+
+
+        private const NumberStyles DefaultNumberStyle = NumberStyles.Float | NumberStyles.AllowThousands;
+
+        private const NumberStyles InvalidNumberStyles = ~(
+            NumberStyles.AllowLeadingWhite |
+            NumberStyles.AllowTrailingWhite |
+            NumberStyles.AllowLeadingSign |
+            NumberStyles.AllowTrailingSign |
+            NumberStyles.AllowParentheses |
+            NumberStyles.AllowDecimalPoint|
+            NumberStyles.AllowThousands |
+            NumberStyles.AllowExponent |
+            NumberStyles.AllowCurrencySymbol |
+            NumberStyles.AllowHexSpecifier);
+
+
         /// <summary>
         /// The real component of the complex number.
         /// </summary>
@@ -198,7 +211,7 @@ namespace MathNet.Numerics
                 float b = MathF.Abs(_imag);
                 if (a > b)
                 {
-                    var tmp = b / a;
+                    float tmp = b / a;
                     return a * MathF.Sqrt(1.0f + tmp * tmp);
 
                 }
@@ -258,12 +271,6 @@ namespace MathNet.Numerics
                 return new Complex32(_real / mod, _imag / mod);
             }
         }
-
-        public static int Radix => throw new NotImplementedException();
-
-        public static Complex32 AdditiveIdentity => throw new NotImplementedException();
-
-        public static Complex32 MultiplicativeIdentity => throw new NotImplementedException();
 
         /// <summary>
         /// Gets a value indicating whether the <c>Complex32</c> is zero.
@@ -487,15 +494,15 @@ namespace MathNet.Numerics
 
             if (Real >= 0.0f)
             {
-                result = new Complex32(w, Imaginary / (2.0f * w));
+                result = new Complex32(w, (Imaginary / (2.0f * w)));
             }
             else if (Imaginary >= 0.0f)
             {
-                result = new Complex32(absImag / (2.0f * w), w);
+                result = new Complex32((absImag / (2.0f * w)), w);
             }
             else
             {
-                result = new Complex32((absImag / (2.0f * w)), -w);
+                result = new Complex32(absImag / (2.0f * w), -w);
             }
 
             return result;
@@ -798,7 +805,7 @@ namespace MathNet.Numerics
         /// </summary>
         /// <returns>The string representation of the current instance in Cartesian form, as specified by <paramref name="provider" />.</returns>
         /// <param name="provider">An object that supplies culture-specific formatting information.</param>
-        public string ToString(IFormatProvider? provider)
+        public string ToString(IFormatProvider provider)
         {
             return string.Format(provider, "({0}, {1})", _real, _imag);
         }
@@ -885,6 +892,169 @@ namespace MathNet.Numerics
 
         #region Parse Functions
 
+#if NET7_0_OR_GREATER
+
+        /// <inheritdoc cref="INumberBase{TSelf}.Parse(ReadOnlySpan{char}, NumberStyles, IFormatProvider?)" />
+        public static Complex32 Parse(ReadOnlySpan<char> s, NumberStyles style, IFormatProvider? provider = null)
+        {
+            if (!TryParse(s, style, provider, out Complex32 result))
+            {
+                throw new OverflowException();
+            }
+            return result;
+        }
+
+        /// <inheritdoc cref="INumberBase{TSelf}.Parse(string, NumberStyles, IFormatProvider?)"/>
+        public static Complex32 Parse(string value, NumberStyles style, IFormatProvider? provider = null)
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            return Parse(value.AsSpan(), style, provider);
+        }
+
+        /// <inheritdoc cref="IParsable{TSelf}.Parse(string, IFormatProvider?)"/>
+        public static Complex32 Parse(ReadOnlySpan<char> s, IFormatProvider? provider = null)
+        {
+            return Parse(s, DefaultNumberStyle, provider);
+        }
+
+        /// <inheritdoc cref="IParsable{TSelf}.Parse(string, IFormatProvider?)"/>
+        public static Complex32 Parse(string s, IFormatProvider? provider = null)
+        {
+            ArgumentNullException.ThrowIfNull(s);
+            return Parse(s.AsSpan(), DefaultNumberStyle, provider);
+        }
+
+        /// <inheritdoc cref="INumberBase{TSelf}.TryParse(ReadOnlySpan{char}, NumberStyles, IFormatProvider?, out TSelf)"/>
+        public static bool TryParse([NotNullWhen(true)] string? s, IFormatProvider? provider, [MaybeNullWhen(false)] out Complex32 result) => TryParse(s, DefaultNumberStyle, provider, out result);
+
+        /// <inheritdoc cref="INumberBase{TSelf}.TryParse(ReadOnlySpan{char}, NumberStyles, IFormatProvider?, out TSelf)"/>
+        public static bool TryParse(ReadOnlySpan<char> s, NumberStyles style, IFormatProvider? provider, [MaybeNullWhen(false)] out Complex32 result)
+        {
+
+            ValidateParseStyleFloatingPoint(style);
+
+            /* see just like the format
+            * complex32 -> values | '(' values ')'
+            * values -> float (',' float)
+            * float -> any number that can be parsed by float
+            */
+
+            int openBracket = s.IndexOf('(');
+            int closeBracket = s.IndexOf(')');
+
+            if(openBracket > 0)
+            {
+                if ((((style & NumberStyles.AllowLeadingWhite) == 0) || !s.Slice(0, openBracket).IsWhiteSpace()))
+                {
+                    // The opening bracket wasn't the first and we either didn't allow leading whitespace
+                    // or one of the leading characters wasn't whitespace at all.
+
+                    result = default;
+                    return false;
+                }
+                // Slice the string to remove the brackets
+                s = s.Slice(openBracket);
+            }
+            else if(openBracket == 0)
+            {
+                // We have an open bracket, so we must have a closing bracket
+                if(closeBracket == -1)
+                {
+                    result = default;
+                    return false;
+                }
+                else if ((closeBracket != (s.Length - 1)) && (((style & NumberStyles.AllowTrailingWhite) == 0) || !s.Slice(closeBracket).IsWhiteSpace()))
+                {
+                    // The closing bracket wasn't the last and we either didn't allow trailing whitespace
+                    // or one of the trailing characters wasn't whitespace at all.
+
+                    result = default;
+                    return false;
+                }
+                else
+                {
+                    //Slice the string to remove the brackets
+                    s = s.Slice(1, s.Length - 2);
+                }
+            }
+
+
+            int semicolon = s.IndexOf(',');
+            float real, imaginary;
+            if (semicolon > 0)
+            {
+                // We have a comma, so we must have a float after it
+                if (semicolon == s.Length - 1)
+                {
+                    result = default;
+                    return false;
+                }
+                else
+                {
+
+                    if (!float.TryParse(s.Slice(0, semicolon), style, provider, out real))
+                    {
+                        result = default;
+                        return false;
+                    }
+                    if (char.IsWhiteSpace(s[semicolon + 1]))
+                    {
+                        // We allow a single whitespace after the semicolon regardless of style, this is so that
+                        // the output of `ToString` can be correctly parsed by default and values will roundtrip.
+                        semicolon += 1;
+                    }
+                    if (!float.TryParse(s.Slice(semicolon + 1), style, provider, out imaginary))
+                    {
+                        result = default;
+                        return false;
+                    }
+                }
+            }
+            else
+            {
+                // We don't have a comma, so we must have a float before it
+                real = float.Parse(s, style, provider);
+                imaginary = 0.0f;
+            }
+
+            result = new Complex32(real, imaginary);
+            return true;
+
+            static void ValidateParseStyleFloatingPoint(NumberStyles style)
+            {
+                // Check for undefined flags or hex number
+                if ((style & (InvalidNumberStyles | NumberStyles.AllowHexSpecifier)) != 0)
+                {
+                    ThrowInvalid(style);
+
+                    static void ThrowInvalid(NumberStyles value)
+                    {
+                        if ((value & InvalidNumberStyles) != 0)
+                        {
+                            throw new ArgumentException("Number Styles is invalid!", nameof(style));
+                        }
+
+                        throw new ArgumentException("Number Styles is not supported!");
+                    }
+                }
+            }
+        }
+
+        /// <inheritdoc cref="INumberBase{TSelf}.TryParse(string?, NumberStyles, IFormatProvider?, out TSelf)"/>
+        public static bool TryParse([NotNullWhen(true)] string? s, NumberStyles style, IFormatProvider? provider, [MaybeNullWhen(false)] out Complex32 result)
+        {
+            if (s is null)
+            {
+                result = default;
+                return false;
+            }
+            return TryParse(s.AsSpan(), style, provider, out result);
+        }
+
+        /// <inheritdoc cref="IParsable{TSelf}.TryParse(string, IFormatProvider?, out TSelf)"/>
+        public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, [MaybeNullWhen(false)] out Complex32 result) => TryParse(s, DefaultNumberStyle, provider, out result);
+
+#else // For old parse functions to avoid doc problems.
         /// <summary>
         /// Creates a complex number based on a string. The string can be in the
         /// following formats (without the quotes): 'n', 'ni', 'n +/- ni',
@@ -900,9 +1070,82 @@ namespace MathNet.Numerics
         /// An <see cref="IFormatProvider"/> that supplies culture-specific
         /// formatting information.
         /// </param>
-        public static Complex32 Parse(string value, IFormatProvider? formatProvider = null)
+        public static Complex32 Parse(string? value, IFormatProvider? formatProvider = null)
         {
-            return Parse(value.AsSpan(), formatProvider);
+            if (value == null)
+            {
+                throw new ArgumentNullException(nameof(value));
+            }
+
+            value = value.Trim();
+            if (value.Length == 0)
+            {
+                throw new FormatException();
+            }
+
+            // strip out parens
+            if (value.StartsWith("(", StringComparison.Ordinal))
+            {
+                if (!value.EndsWith(")", StringComparison.Ordinal))
+                {
+                    throw new FormatException();
+                }
+
+                value = value.Substring(1, value.Length - 2).Trim();
+            }
+
+            // keywords
+            var numberFormatInfo = GlobalizationHelper.GetNumberFormatInfo(formatProvider);
+            var textInfo = GlobalizationHelper.GetTextInfo(formatProvider);
+            var keywords =
+                new[]
+                {
+                    textInfo.ListSeparator, numberFormatInfo.NaNSymbol,
+                    numberFormatInfo.NegativeInfinitySymbol, numberFormatInfo.PositiveInfinitySymbol,
+                    "+", "-", "i", "j"
+                };
+
+            // lexing
+            var tokens = new LinkedList<string>();
+            GlobalizationHelper.Tokenize(tokens.AddFirst(value), keywords, 0);
+            var token = tokens.First;
+
+            // parse the left part
+            var leftPart = ParsePart(ref token, out var isLeftPartImaginary, formatProvider);
+            if (token == null)
+            {
+                return isLeftPartImaginary ? new Complex32(0, leftPart) : new Complex32(leftPart, 0);
+            }
+
+            // parse the right part
+            if (token.Value == textInfo.ListSeparator)
+            {
+                // format: real,imag
+                token = token.Next;
+
+                if (isLeftPartImaginary)
+                {
+                    // left must not contain 'i', right doesn't matter.
+                    throw new FormatException();
+                }
+
+                var rightPart = ParsePart(ref token, out _, formatProvider);
+
+                return new Complex32(leftPart, rightPart);
+            }
+            else
+            {
+                // format: real + imag
+                var rightPart = ParsePart(ref token, out var isRightPartImaginary, formatProvider);
+
+                if (!(isLeftPartImaginary ^ isRightPartImaginary))
+                {
+                    // either left or right part must contain 'i', but not both.
+                    throw new FormatException();
+                }
+
+                return isLeftPartImaginary ? new Complex32(rightPart, leftPart) : new Complex32(leftPart, rightPart);
+            }
         }
 
         /// <summary>
@@ -916,7 +1159,7 @@ namespace MathNet.Numerics
         /// </param>
         /// <returns>Resulting part as float.</returns>
         /// <exception cref="FormatException"/>
-        static float ParsePart(ref LinkedListNode<string>? token, out bool imaginary, IFormatProvider? format)
+        static float ParsePart(ref LinkedListNode<string> token, out bool imaginary, IFormatProvider? format)
         {
             imaginary = false;
             if (token == null)
@@ -960,7 +1203,7 @@ namespace MathNet.Numerics
                 }
             }
 
-            var value = GlobalizationHelper.ParseSingle(ref token, format.GetCultureInfo());
+            var value = GlobalizationHelper.ParseSingle(ref token, GlobalizationHelper.GetCultureInfo(format));
 
             // handle suffix imaginary symbol
             if (token != null && (string.Compare(token.Value, "i", StringComparison.OrdinalIgnoreCase) == 0
@@ -980,25 +1223,6 @@ namespace MathNet.Numerics
         }
 
         /// <summary>
-        /// Converts the string representation of a complex number to a single-precision complex number equivalent.
-        /// A return value indicates whether the conversion succeeded or failed.
-        /// </summary>
-        /// <param name="value">
-        /// A string containing a complex number to convert.
-        /// </param>
-        /// <param name="result">
-        /// The parsed value.
-        /// </param>
-        /// <returns>
-        /// If the conversion succeeds, the result will contain a complex number equivalent to value.
-        /// Otherwise the result will contain complex32.Zero.  This parameter is passed uninitialized
-        /// </returns>
-        public static bool TryParse(string value, out Complex32 result)
-        {
-            return TryParse(value, null, out result);
-        }
-
-        /// <summary>
         /// Converts the string representation of a complex number to single-precision complex number equivalent.
         /// A return value indicates whether the conversion succeeded or failed.
         /// </summary>
@@ -1015,7 +1239,7 @@ namespace MathNet.Numerics
         /// If the conversion succeeds, the result will contain a complex number equivalent to value.
         /// Otherwise the result will contain complex32.Zero.  This parameter is passed uninitialized
         /// </returns>
-        public static bool TryParse(string value, IFormatProvider? formatProvider, out Complex32 result)
+        public static bool TryParse(string? value, IFormatProvider? formatProvider, out Complex32 result)
         {
             bool ret;
             try
@@ -1037,7 +1261,27 @@ namespace MathNet.Numerics
             return ret;
         }
 
+#endif
         #endregion
+
+        /// <summary>
+        /// Converts the string representation of a complex number to a single-precision complex number equivalent.
+        /// A return value indicates whether the conversion succeeded or failed.
+        /// </summary>
+        /// <param name="value">
+        /// A string containing a complex number to convert.
+        /// </param>
+        /// <param name="result">
+        /// The parsed value.
+        /// </param>
+        /// <returns>
+        /// If the conversion succeeds, the result will contain a complex number equivalent to value.
+        /// Otherwise the result will contain complex32.Zero.  This parameter is passed uninitialized
+        /// </returns>
+        public static bool TryParse(string value, out Complex32 result)
+        {
+            return TryParse(value, null, out result);
+        }
 
         #region Conversion
 
@@ -1175,16 +1419,6 @@ namespace MathNet.Numerics
             return new Complex32((float)value, 0.0f);
         }
 
-        public static Complex32 operator --(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static Complex32 operator ++(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
         /// <summary>
         /// Converts this <c>Complex32</c> to a <see cref="Complex"/>.
         /// </summary>
@@ -1292,6 +1526,7 @@ namespace MathNet.Numerics
         /// </summary>
         /// <returns>The absolute value of <paramref name="value" />.</returns>
         /// <param name="value">A complex number.</param>
+        /// <remarks>Note: It returns a <see cref="double"/> value.which is different from the behavior of INumberBase.Abs imported in .net 7.</remarks>
         [TargetedPatchingOptOut("Performance critical to inline this type of method across NGen image boundaries")]
         public static double Abs(Complex32 value)
         {
@@ -1456,507 +1691,5 @@ namespace MathNet.Numerics
         {
             return (Complex32)Trig.Tanh(value.ToComplex());
         }
-
-        public static bool IsCanonical(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool IsComplexNumber(Complex32 value) => true;
-
-        public static bool IsEvenInteger(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool IsFinite(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool IsImaginaryNumber(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool IsInfinity(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool IsInteger(Complex32 value) => false;
-
-        public static bool IsNaN(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool IsNegative(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool IsNegativeInfinity(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool IsNormal(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool IsOddInteger(Complex32 value) => false;
-
-        public static bool IsPositive(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool IsPositiveInfinity(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool IsRealNumber(Complex32 value) => value._imag == 0.0f;
-
-        public static bool IsSubnormal(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool IsZero(Complex32 value)
-        {
-            return value._real == 0.0f && value._imag == 0.0f;
-        }
-
-        public static Complex32 MaxMagnitude(Complex32 x, Complex32 y)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static Complex32 MaxMagnitudeNumber(Complex32 x, Complex32 y)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static Complex32 MinMagnitude(Complex32 x, Complex32 y)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static Complex32 MinMagnitudeNumber(Complex32 x, Complex32 y)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static Complex32 Parse(ReadOnlySpan<char> s, NumberStyles style = NumberStyles.None, IFormatProvider? provider = null)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static Complex32 Parse(string s, NumberStyles style, IFormatProvider provider)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static Complex32 Parse(ReadOnlySpan<char> value, IFormatProvider? provider)
-        {
-            if (value == null)
-            {
-                throw new ArgumentNullException(nameof(value));
-            }
-
-            value = value.Trim();
-            if (value.Length == 0)
-            {
-                throw new FormatException();
-            }
-
-            if(value[0] == '(')
-            {
-                if (value[value.Length - 1] == ')')
-                {
-                    value = value.Slice(1, value.Length - 2).Trim();
-                }
-                else
-                {
-                    throw new FormatException();
-                }
-            }
-
-            // strip out parens
-            /*
-            if (value.StartsWith("(", StringComparison.Ordinal))
-            {
-                if (!value.EndsWith(")", StringComparison.Ordinal))
-                {
-                    throw new FormatException();
-                }
-
-                value = value.Substring(1, value.Length - 2).Trim();
-            }
-            */
-
-            // keywords
-            var numberFormatInfo = GlobalizationHelper.GetNumberFormatInfo(provider);
-            var textInfo = GlobalizationHelper.GetTextInfo(provider);
-            var keywords =
-                new[]
-                {
-                    textInfo.ListSeparator, numberFormatInfo.NaNSymbol,
-                    numberFormatInfo.NegativeInfinitySymbol, numberFormatInfo.PositiveInfinitySymbol,
-                    "+", "-", "i", "j"
-                };
-
-            // lexing
-            var tokens = new LinkedList<ReadOnlySpan<char>>();
-            GlobalizationHelper.Tokenize(tokens.AddFirst(value), keywords, 0);
-            LinkedListNode<string>? token = tokens.First;
-
-            // parse the left part
-            var leftPart = ParsePart(ref token, out var isLeftPartImaginary, formatProvider);
-            if (token == null)
-            {
-                return isLeftPartImaginary ? new Complex32(0, leftPart) : new Complex32(leftPart, 0);
-            }
-
-            // parse the right part
-            if (token.Value == textInfo.ListSeparator)
-            {
-                // format: real,imag
-                token = token.Next;
-
-                if (isLeftPartImaginary)
-                {
-                    // left must not contain 'i', right doesn't matter.
-                    throw new FormatException();
-                }
-
-                var rightPart = ParsePart(ref token, out _, formatProvider);
-
-                return new Complex32(leftPart, rightPart);
-            }
-            else
-            {
-                // format: real + imag
-                var rightPart = ParsePart(ref token, out var isRightPartImaginary, formatProvider);
-
-                if (!(isLeftPartImaginary ^ isRightPartImaginary))
-                {
-                    // either left or right part must contain 'i', but not both.
-                    throw new FormatException();
-                }
-
-                return isLeftPartImaginary ? new Complex32(rightPart, leftPart) : new Complex32(leftPart, rightPart);
-            }
-        }
-
-#if NET5_0_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
-
-        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format, IFormatProvider? provider)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool TryParse(ReadOnlySpan<char> s, NumberStyles style, IFormatProvider? provider, [MaybeNullWhen(false)] out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool TryParse([NotNullWhen(true)] string s, NumberStyles? style, IFormatProvider? provider, [MaybeNullWhen(false)] out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, [MaybeNullWhen(false)] out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool TryParse([NotNullWhen(true)] string? s, NumberStyles style, IFormatProvider? provider, [MaybeNullWhen(false)] out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-#else
-
-
-
-        public bool TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format, IFormatProvider provider)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool TryParse(ReadOnlySpan<char> s, NumberStyles? style, IFormatProvider? provider, out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool TryParse(string s, NumberStyles? style, IFormatProvider? provider, out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-
-        public static bool TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-#endif
-
-
-#if NET7_0_OR_GREATER
-        static Complex32 INumberBase<Complex32>.One => throw new NotImplementedException();
-
-        static Complex32 INumberBase<Complex32>.Zero => throw new NotImplementedException();
-
-        static int INumberBase<Complex32>.Radix => throw new NotImplementedException();
-
-        static Complex32 IAdditiveIdentity<Complex32, Complex32>.AdditiveIdentity => throw new NotImplementedException();
-
-        static Complex32 IMultiplicativeIdentity<Complex32, Complex32>.MultiplicativeIdentity => throw new NotImplementedException();
-
-        public static Complex32 NegativeOne => new Complex32(-1f, 0f);
-
-        static Complex32 INumberBase<Complex32>.Abs(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsCanonical(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsComplexNumber(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsEvenInteger(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsFinite(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsImaginaryNumber(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsInfinity(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsInteger(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsNaN(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsNegative(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsNegativeInfinity(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsNormal(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsOddInteger(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsPositive(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsPositiveInfinity(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsRealNumber(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsSubnormal(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.IsZero(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 INumberBase<Complex32>.MaxMagnitude(Complex32 x, Complex32 y)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 INumberBase<Complex32>.MaxMagnitudeNumber(Complex32 x, Complex32 y)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 INumberBase<Complex32>.MinMagnitude(Complex32 x, Complex32 y)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 INumberBase<Complex32>.MinMagnitudeNumber(Complex32 x, Complex32 y)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 INumberBase<Complex32>.Parse(ReadOnlySpan<char> s, NumberStyles style, IFormatProvider? provider)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 INumberBase<Complex32>.Parse(string s, NumberStyles style, IFormatProvider? provider)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.TryConvertFromChecked<TOther>(TOther value, out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.TryConvertFromSaturating<TOther>(TOther value, out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.TryConvertFromTruncating<TOther>(TOther value, out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.TryConvertToChecked<TOther>(Complex32 value, out TOther result)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.TryConvertToSaturating<TOther>(Complex32 value, out TOther result)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.TryConvertToTruncating<TOther>(Complex32 value, out TOther result)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.TryParse(ReadOnlySpan<char> s, NumberStyles style, IFormatProvider? provider, out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool INumberBase<Complex32>.TryParse(string? s, NumberStyles style, IFormatProvider? provider, out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-
-        bool ISpanFormattable.TryFormat(Span<char> destination, out int charsWritten, ReadOnlySpan<char> format, IFormatProvider? provider)
-        {
-            throw new NotImplementedException();
-        }
-
-        string IFormattable.ToString(string? format, IFormatProvider? formatProvider)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 ISpanParsable<Complex32>.Parse(ReadOnlySpan<char> s, IFormatProvider? provider)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool ISpanParsable<Complex32>.TryParse(ReadOnlySpan<char> s, IFormatProvider? provider, out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 IParsable<Complex32>.Parse(string s, IFormatProvider? provider)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool IParsable<Complex32>.TryParse(string? s, IFormatProvider? provider, out Complex32 result)
-        {
-            throw new NotImplementedException();
-        }
-        static Complex32 IAdditionOperators<Complex32, Complex32, Complex32>.operator +(Complex32 left, Complex32 right)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 IDecrementOperators<Complex32>.operator --(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 IDivisionOperators<Complex32, Complex32, Complex32>.operator /(Complex32 left, Complex32 right)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool IEqualityOperators<Complex32, Complex32, bool>.operator ==(Complex32 left, Complex32 right)
-        {
-            throw new NotImplementedException();
-        }
-
-        static bool IEqualityOperators<Complex32, Complex32, bool>.operator !=(Complex32 left, Complex32 right)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 IIncrementOperators<Complex32>.operator ++(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 IMultiplyOperators<Complex32, Complex32, Complex32>.operator *(Complex32 left, Complex32 right)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 ISubtractionOperators<Complex32, Complex32, Complex32>.operator -(Complex32 left, Complex32 right)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 IUnaryNegationOperators<Complex32, Complex32>.operator -(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-
-        static Complex32 IUnaryPlusOperators<Complex32, Complex32>.operator +(Complex32 value)
-        {
-            throw new NotImplementedException();
-        }
-#endif
-
     }
-
 }
