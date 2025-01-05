@@ -37,6 +37,7 @@ using BigInteger = System.Numerics.BigInteger;
 using System.Runtime;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
+using System.Buffers;
 
 namespace MathNet.Numerics
 {
@@ -76,7 +77,7 @@ namespace MathNet.Numerics
     {
 
 
-        private const NumberStyles DefaultNumberStyle = NumberStyles.Float | NumberStyles.AllowThousands;
+        private const NumberStyles DefaultNumberStyle = NumberStyles.Float | NumberStyles.AllowThousands | NumberStyles.AllowTrailingSign;
 
         private const NumberStyles InvalidNumberStyles = ~(
             NumberStyles.AllowLeadingWhite |
@@ -899,7 +900,7 @@ namespace MathNet.Numerics
         {
             if (!TryParse(s, style, provider, out Complex32 result))
             {
-                throw new OverflowException();
+                throw new FormatException();
             }
             return result;
         }
@@ -925,7 +926,7 @@ namespace MathNet.Numerics
         }
 
         /// <inheritdoc cref="INumberBase{TSelf}.TryParse(ReadOnlySpan{char}, NumberStyles, IFormatProvider?, out TSelf)"/>
-        public static bool TryParse([NotNullWhen(true)] string? s, IFormatProvider? provider, [MaybeNullWhen(false)] out Complex32 result) => TryParse(s, DefaultNumberStyle, provider, out result);
+        public static bool TryParse([NotNullWhen(true)] string? s, IFormatProvider? provider, [MaybeNullWhen(false)] out Complex32 result) => TryParse(s, Complex32.DefaultNumberStyle, provider, out result);
 
         /// <inheritdoc cref="INumberBase{TSelf}.TryParse(ReadOnlySpan{char}, NumberStyles, IFormatProvider?, out TSelf)"/>
         public static bool TryParse(ReadOnlySpan<char> s, NumberStyles style, IFormatProvider? provider, [MaybeNullWhen(false)] out Complex32 result)
@@ -933,109 +934,371 @@ namespace MathNet.Numerics
 
             ValidateParseStyleFloatingPoint(style);
 
-            /* see just like the format
-            * complex32 -> values | '(' values ')'
-            * values -> float (',' float)
-            * float -> any number that can be parsed by float
-            */
+
+            // following formats (without the quotes):
+            // 'n',
+            // 'ni',
+            // 'n +/- ni',
+            // 'ni +/- n',
+            // 'n,n',
+            // 'n,ni,',
+            // '(n,n)',
+            // '(n,ni)',
+            // where n is a float.
+
+            //symbols including '(', ')', 'i', 'j', '+', '-', ','
+
+
+
+            // keywords
+            var numberFormatInfo = GlobalizationHelper.GetNumberFormatInfo(provider);
+            var textInfo = GlobalizationHelper.GetTextInfo(provider);
+            ReadOnlySpan<Char> keywords = ['i', 'j'];
+            ReadOnlySpan<char> separator = textInfo.ListSeparator.AsSpan();
+            string[] sign = ArrayPool<string>.Shared.Rent(4);
+            sign[0] = numberFormatInfo.PositiveSign;
+            sign[1] = numberFormatInfo.NegativeSign;
+            ReadOnlySpan<string> customSignSpan = sign.AsSpan()[..2];
+            float real, imaginary;
+
+            //if there are brackets, just two formats are allowed:
+            // '(n,n)',
+            // '(n,ni)'
 
             int openBracket = s.IndexOf('(');
             int closeBracket = s.IndexOf(')');
-
-            if(openBracket > 0)
+            int separatorIndex;
+            if (openBracket >= 0)
             {
-                if ((((style & NumberStyles.AllowLeadingWhite) == 0) || !s.Slice(0, openBracket).IsWhiteSpace()))
+                //Clear the brackets
+                if (openBracket > 0)
                 {
-                    // The opening bracket wasn't the first and we either didn't allow leading whitespace
-                    // or one of the leading characters wasn't whitespace at all.
+                    if ((((style & NumberStyles.AllowLeadingWhite) == 0) || !s.Slice(0, openBracket).IsWhiteSpace()))
+                    {
+                        // The opening bracket wasn't the first and we either didn't allow leading whitespace
+                        // or one of the leading characters wasn't whitespace at all.
 
-                    result = default;
-                    return false;
+                        result = default;
+                        return false;
+                    }
+                    // Slice the string to remove the brackets
+                    s = s.Slice(openBracket);
                 }
-                // Slice the string to remove the brackets
-                s = s.Slice(openBracket);
-            }
-            else if(openBracket == 0)
-            {
-                // We have an open bracket, so we must have a closing bracket
-                if(closeBracket == -1)
+                else// if (openBracket == 0)
                 {
-                    result = default;
-                    return false;
-                }
-                else if ((closeBracket != (s.Length - 1)) && (((style & NumberStyles.AllowTrailingWhite) == 0) || !s.Slice(closeBracket).IsWhiteSpace()))
-                {
-                    // The closing bracket wasn't the last and we either didn't allow trailing whitespace
-                    // or one of the trailing characters wasn't whitespace at all.
-
-                    result = default;
-                    return false;
-                }
-                else
-                {
-                    //Slice the string to remove the brackets
-                    s = s.Slice(1, s.Length - 2);
-                }
-            }
-
-
-            int semicolon = s.IndexOf(',');
-            float real, imaginary;
-            if (semicolon > 0)
-            {
-                // We have a comma, so we must have a float after it
-                if (semicolon == s.Length - 1)
-                {
-                    result = default;
-                    return false;
-                }
-                else
-                {
-
-                    if (!float.TryParse(s.Slice(0, semicolon), style, provider, out real))
+                    // We have an open bracket, so we must have a closing bracket
+                    if (closeBracket == -1)
                     {
                         result = default;
                         return false;
                     }
-                    if (char.IsWhiteSpace(s[semicolon + 1]))
+                    else if ((closeBracket != (s.Length - 1)) && (((style & NumberStyles.AllowTrailingWhite) == 0) || !s.Slice(closeBracket + 1).IsWhiteSpace()))
                     {
-                        // We allow a single whitespace after the semicolon regardless of style, this is so that
-                        // the output of `ToString` can be correctly parsed by default and values will roundtrip.
-                        semicolon += 1;
+                        // The closing bracket wasn't the last and we either didn't allow trailing whitespace
+                        // or one of the trailing characters wasn't whitespace at all.
+
+                        result = default;
+                        return false;
                     }
-                    if (!float.TryParse(s.Slice(semicolon + 1), style, provider, out imaginary))
+                    else
+                    {
+                        //Slice the string to remove the brackets
+                        s = s.Slice(1, s.Length - 2);
+                    }
+                }
+            }
+            separatorIndex = s.IndexOf(separator);
+            // with separator
+            // 'n,n',
+            // 'n,ni,'
+            if (separatorIndex > -1)
+            {
+                //if there is a separator, there must be two parts
+                ReadOnlySpan<char> realPart = s.Slice(0, separatorIndex);
+                ReadOnlySpan<char> imaginaryPart = s.Slice(separatorIndex + separator.Length);
+                //also, we need to check if the imaginary part is a number
+                int iPosition = imaginaryPart.IndexOfAny(keywords);
+                bool hasKeyword = iPosition > -1;
+                if (hasKeyword)
+                {
+                    //Left span in imaginaryPart after 'i' should be empty
+                    ReadOnlySpan<char> left = imaginaryPart[(iPosition + 1)..];
+                    if (!IsEmptyOrWhiteSpace(left))
                     {
                         result = default;
                         return false;
                     }
+                    imaginaryPart = imaginaryPart[..iPosition].Trim();
+
                 }
+                if(!TryParseCheckedEmptyAsZero(realPart, style, provider, out real))
+                {
+                    result = default;
+                    return false;
+                }
+                bool success = hasKeyword ? TryParseCheckedEmptyAsOne(imaginaryPart, style, provider, out imaginary) : TryParseCheckedEmptyAsZero(imaginaryPart, style, provider, out imaginary);
+                result = new Complex32(real, imaginary);
+                return success;
             }
             else
             {
-                // We don't have a comma, so we must have a float before it
-                real = float.Parse(s, style, provider);
-                imaginary = 0.0f;
-            }
+                //now it can be following formats:
+                // 'n',
+                // 'ni',
+                // 'n +/- ni',
+                // 'ni +/- n',
 
-            result = new Complex32(real, imaginary);
-            return true;
-
-            static void ValidateParseStyleFloatingPoint(NumberStyles style)
-            {
-                // Check for undefined flags or hex number
-                if ((style & (InvalidNumberStyles | NumberStyles.AllowHexSpecifier)) != 0)
+                //firstly, check 'i' or 'j'
+                int iPosition = s.IndexOfAny(keywords);
+                if (iPosition == -1)
                 {
-                    ThrowInvalid(style);
-
-                    static void ThrowInvalid(NumberStyles value)
+                    // no 'i' means only a real value:
+                    // 'n'
+                    if (!TryParseCheckedEmptyAsZero(s, style, provider, out real))
                     {
-                        if ((value & InvalidNumberStyles) != 0)
+                        result = default;
+                        return false;
+                    }
+                    result = new Complex32(real, 0);
+                    return true;
+                }
+                else
+                {
+
+                    //if there is an 'i', it will be divided into two parts by 'i'.
+                    // 'ni'=> 'n' + empty
+                    // 'n +/- ni' => 'n +/- n' + empty
+                    // 'ni +/- n'=> 'n' + 'n'
+                    var left = s[..iPosition];
+                    var right = s[(iPosition + 1)..];
+                    //firstly, check if right part is whitespace or contains any sign
+                    if (!IsEmptyOrWhiteSpace(right))
+                    {
+                        // it means right part is not empty, so it should be a number
+                        if (!TryParseCheckedEmptyAsZero(right, style, provider, out real))
                         {
-                            throw new ArgumentException("Number Styles is invalid!", nameof(style));
+                            result = default;
+                            return false;
+                        }
+                        // now check left part
+                        if (!TryParseCheckedEmptyAsOne(left, style, provider, out imaginary))
+                        {
+                            result = default;
+                            return false;
+                        }
+                        result = new Complex32(imaginary, real);
+                        return true;
+                    }
+                    else
+                    {
+                        //right part is empty, so left is:
+                        // 'ni'=> 'n'
+                        // 'n +/- ni' => 'n +/- n'
+                        //however, float number also can contain a sign self.
+                        //We suppose that it is just like '-5e-7 - 6e-3i' instead of '-5e-7 + -6e-3i'
+                        //so we can include the symbol as a part on the imag side
+                        //now check all the signs
+                        //The signs can appear up to four times.
+                        Span<Range> ranges = stackalloc Range[5];
+                        int count = 0;
+                        int start = 0;
+                        int signIndex = -1;
+                        int signLength = 0;
+                        Range signRange = new Range(0, 0);
+                        ReadOnlySpan<char> total = left;
+                        do
+                        {
+                            signIndex = -1;
+                            foreach (var signStr in customSignSpan)
+                            {
+                                var currentIndex = left.IndexOfAny(signStr);
+                                if (currentIndex > -1)
+                                {
+                                    if (signIndex == -1 || currentIndex < signIndex)
+                                    {
+                                        signIndex = currentIndex;
+                                        signLength = signStr.Length;
+                                    }
+                                }
+                            }
+                            if (signIndex > -1)
+                            {
+                                ranges[count++] = signRange.Start.Value..(signRange.End.Value + signIndex);
+                                signRange = new Range(signRange.End.Value +  signIndex, signLength);
+                                start += signIndex + signLength;
+                                left = total[start..];
+                            }
+                        } while (signIndex != -1);
+                        ranges[count++] = (start - signLength)..total.Length;
+                        left = total;
+                        int splitIndex = 0;
+                        bool fullForImag = false;
+
+                        ReadOnlySpan<char> realPart, imaginaryPart;
+                        // count can be 1 to 5
+                        switch (count)
+                        {
+                            // if count is 1, it means there is only a imaginary number without any sign.
+                            case 1:
+                                fullForImag = true;
+                                break;
+                            case 2:
+                                // if count is 2, there is just a imaginary number only when the last effective char of the first part is a exp simbol.
+                                if (LastEffectiveCharIsExpSymbol(left[ranges[0]]))
+                                {
+                                    goto case 1;
+                                }
+                                else
+                                {
+                                    splitIndex = 1;
+                                    break;
+                                }
+                            case 3:
+                                realPart = total[ranges[0]];
+                                imaginaryPart = total[ranges[3]];
+                                // just like count == 2
+                                if (LastEffectiveCharIsExpSymbol(left[ranges[1]]))
+                                {
+                                    splitIndex = 1;
+                                }
+                                else
+                                {
+                                    splitIndex = 2;
+                                }
+                                break;
+                            case 4:
+                                // 2+2 by default
+                                splitIndex = LastEffectiveCharIsExpSymbol(total[ranges[1]]) ?//-1e-2-3i
+                                    3 : 2;
+                                break;
+                            case 5:
+                                // 3+2
+                                splitIndex = 3;
+                                break;
                         }
 
-                        throw new ArgumentException("Number Styles is not supported!");
+                        if (fullForImag)
+                        {
+                            if(TryParseCheckedEmptyAsOne(total, style, provider, out imaginary))
+                            {
+                                result = new Complex32(0, imaginary);
+                                return true;
+                            }
+                        }
+                        else
+                        {
+                            int splitPos = ranges[splitIndex].GetOffsetAndLength(total.Length).Offset;
+                            realPart = total[..splitPos];
+                            imaginaryPart = total[splitPos..];
+                            if (TryParseCheckedEmptyAsZero(realPart, style, provider, out real) &&
+                                TryParseCheckedEmptyAsOne(imaginaryPart, style, provider, out imaginary))
+                            {
+                                result = new Complex32(real, imaginary);
+                                return true;
+                            }
+                        }
+                        result = default;
+                        return false;
                     }
+                }
+            }
+
+            bool TryParseCheckedEmptyAsOne(ReadOnlySpan<char> span, NumberStyles stype, IFormatProvider? provider, out float value)
+            {
+                span = span.Trim();
+                var positiveSign = numberFormatInfo.PositiveSign;
+                var negativeSign = numberFormatInfo.NegativeSign;
+                bool negative = false;
+                if (span.StartsWith(positiveSign))
+                {
+                    span = span[positiveSign.Length..];
+                }
+                else if (span.StartsWith(negativeSign))
+                {
+                    span = span[negativeSign.Length..];
+                    negative = true;
+                }
+                if (span.IsEmpty)
+                {
+                    value = negative? -1f : 1f;
+                    return true;
+                }
+                bool success = float.TryParse(span, stype, provider, out value);
+                if (negative)
+                {
+                    value = -value;
+                }
+                return success;
+            }
+
+            bool TryParseCheckedEmptyAsZero(ReadOnlySpan<char> span, NumberStyles stype, IFormatProvider? provider, out float value)
+            {
+                span = span.Trim();
+                var positiveSign = numberFormatInfo.PositiveSign;
+                var negativeSign = numberFormatInfo.NegativeSign;
+                bool negative = false;
+                if (span.StartsWith(positiveSign))
+                {
+                    span = span[positiveSign.Length..];
+                }
+                else if (span.StartsWith(negativeSign))
+                {
+                    span = span[negativeSign.Length..];
+                    negative = true;
+                }
+                if (span.IsEmpty)
+                {
+                    value = 0;
+                    return true;
+                }
+                bool success = float.TryParse(span, stype, provider, out value);
+                if (negative)
+                {
+                    value = -value;
+                }
+                return success;
+            }
+            bool IsEmptyOrWhiteSpace(ReadOnlySpan<char> span)
+            {
+                return span.IsEmpty || span.IsWhiteSpace();
+            }
+            bool LastEffectiveCharIsExpSymbol(ReadOnlySpan<char> c)
+            {
+                if (c.IsEmpty)
+                {
+                    return false;
+                }
+                for (int i = c.Length - 1; i >= 0; i--)
+                {
+                    if (char.IsWhiteSpace(c[i]))
+                    {
+                        continue;
+                    }
+                    if (c[i] is 'e' or 'E')
+                    {
+                        return true;
+                    }
+                    return false;
+                }
+                return false;
+            }
+        }
+
+        private static void ValidateParseStyleFloatingPoint(NumberStyles style)
+        {
+            // Check for undefined flags or hex number
+            if ((style & (InvalidNumberStyles | NumberStyles.AllowHexSpecifier)) != 0)
+            {
+                ThrowInvalid(style);
+
+                static void ThrowInvalid(NumberStyles value)
+                {
+                    if ((value & InvalidNumberStyles) != 0)
+                    {
+                        throw new ArgumentException("Number Styles is invalid!", nameof(style));
+                    }
+
+                    throw new ArgumentException("Number Styles is not supported!");
                 }
             }
         }
