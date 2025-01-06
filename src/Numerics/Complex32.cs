@@ -77,7 +77,7 @@ namespace MathNet.Numerics
     {
 
 
-        private const NumberStyles DefaultNumberStyle = NumberStyles.Float | NumberStyles.AllowThousands | NumberStyles.AllowTrailingSign;
+        private const NumberStyles DefaultNumberStyle = NumberStyles.Float | NumberStyles.AllowThousands;
 
         private const NumberStyles InvalidNumberStyles = ~(
             NumberStyles.AllowLeadingWhite |
@@ -472,6 +472,11 @@ namespace MathNet.Numerics
         /// </returns>
         public Complex32 SquareRoot()
         {
+
+            // Note: the following code should be equivalent to Complex.Sqrt(complex),
+            // but it turns out that is implemented poorly in System.Numerics,
+            // hence we provide our own implementation here. Do not replace.
+
             if (IsRealNonNegative())
             {
                 return new Complex32(MathF.Sqrt(_real), 0.0f);
@@ -479,31 +484,32 @@ namespace MathNet.Numerics
 
             Complex32 result;
 
-            var absReal = MathF.Abs(Real);
-            var absImag = MathF.Abs(Imaginary);
-            float w;
+            var absReal = Math.Abs(Real);
+            var absImag = Math.Abs(Imaginary);
+            var w = 0.0;
             if (absReal >= absImag)
             {
                 var ratio = Imaginary / Real;
-                w = MathF.Sqrt(absReal) * MathF.Sqrt(0.5f * (1.0f + MathF.Sqrt(1.0f + (ratio * ratio))));
+                w = Math.Sqrt(absReal) * Math.Sqrt(0.5 * (1.0 + Math.Sqrt(1.0 + (ratio * ratio))));
             }
             else
             {
                 var ratio = Real / Imaginary;
-                w = MathF.Sqrt(absImag) * MathF.Sqrt(0.5f * (MathF.Abs(ratio) + MathF.Sqrt(1.0f + (ratio * ratio))));
+                w = Math.Sqrt(absImag) * Math.Sqrt(0.5 * (Math.Abs(ratio) + Math.Sqrt(1.0 + (ratio * ratio))));
             }
+            var wf = (float)w;
 
-            if (Real >= 0.0f)
+            if (Real >= 0.0)
             {
-                result = new Complex32(w, (Imaginary / (2.0f * w)));
+                result = new Complex32(wf, (float)(Imaginary / (2.0 * w)));
             }
-            else if (Imaginary >= 0.0f)
+            else if (Imaginary >= 0.0)
             {
-                result = new Complex32((absImag / (2.0f * w)), w);
+                result = new Complex32((float)(absImag / (2.0 * w)), wf);
             }
             else
             {
-                result = new Complex32(absImag / (2.0f * w), -w);
+                result = new Complex32((float)(absImag / (2.0 * w)), -wf);
             }
 
             return result;
@@ -1007,6 +1013,11 @@ namespace MathNet.Numerics
                     }
                 }
             }
+            if (IsEmptyOrWhiteSpace(s))
+            {
+                result = default;
+                return false;
+            }
             separatorIndex = s.IndexOf(separator);
             // with separator
             // 'n,n',
@@ -1016,6 +1027,11 @@ namespace MathNet.Numerics
                 //if there is a separator, there must be two parts
                 ReadOnlySpan<char> realPart = s.Slice(0, separatorIndex);
                 ReadOnlySpan<char> imaginaryPart = s.Slice(separatorIndex + separator.Length);
+                if(IsEmptyOrWhiteSpace(realPart) || IsEmptyOrWhiteSpace(imaginaryPart))
+                {
+                    result = default;
+                    return false;
+                }
                 //also, we need to check if the imaginary part is a number
                 int iPosition = imaginaryPart.IndexOfAny(keywords);
                 bool hasKeyword = iPosition > -1;
@@ -1054,7 +1070,7 @@ namespace MathNet.Numerics
                 {
                     // no 'i' means only a real value:
                     // 'n'
-                    if (!TryParseCheckedEmptyAsZero(s, style, provider, out real))
+                    if (!float.TryParse(s, style, provider, out real))//cannot use CheckedEmptyAs because str like "-" should not pass
                     {
                         result = default;
                         return false;
@@ -1075,7 +1091,7 @@ namespace MathNet.Numerics
                     if (!IsEmptyOrWhiteSpace(right))
                     {
                         // it means right part is not empty, so it should be a number
-                        if (!TryParseCheckedEmptyAsZero(right, style, provider, out real))
+                        if (!float.TryParse(right, style, provider, out real))//consider "i+" as invalid
                         {
                             result = default;
                             return false;
@@ -1104,7 +1120,8 @@ namespace MathNet.Numerics
                         int start = 0;
                         int signIndex = -1;
                         int signLength = 0;
-                        Range signRange = new Range(0, 0);
+                        int signRangeStart = 0;
+                        int signRangeEnd = 0;
                         ReadOnlySpan<char> total = left;
                         do
                         {
@@ -1123,8 +1140,9 @@ namespace MathNet.Numerics
                             }
                             if (signIndex > -1)
                             {
-                                ranges[count++] = signRange.Start.Value..(signRange.End.Value + signIndex);
-                                signRange = new Range(signRange.End.Value +  signIndex, signLength);
+                                ranges[count++] = signRangeStart..(signRangeEnd + signIndex);
+                                signRangeStart = signRangeEnd + signIndex;
+                                signRangeEnd = signRangeStart + signLength;
                                 start += signIndex + signLength;
                                 left = total[start..];
                             }
@@ -1187,7 +1205,7 @@ namespace MathNet.Numerics
                         }
                         else
                         {
-                            int splitPos = ranges[splitIndex].GetOffsetAndLength(total.Length).Offset;
+                            int splitPos = ranges[splitIndex].Start.Value;
                             realPart = total[..splitPos];
                             imaginaryPart = total[splitPos..];
                             if (TryParseCheckedEmptyAsZero(realPart, style, provider, out real) &&
@@ -1264,6 +1282,7 @@ namespace MathNet.Numerics
             }
             bool LastEffectiveCharIsExpSymbol(ReadOnlySpan<char> c)
             {
+                c = c.TrimEnd();
                 if (c.IsEmpty)
                 {
                     return false;
