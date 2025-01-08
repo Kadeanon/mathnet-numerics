@@ -158,7 +158,7 @@ namespace MathNet.Numerics.LinearAlgebra.Storage
 
         /// <summary>
         /// Calculates the amount with which to grow the storage array's if they need to be
-        /// increased in size.
+        /// increased in size. 
         /// </summary>
         /// <returns>The amount grown.</returns>
         int GrowthSize()
@@ -234,6 +234,18 @@ namespace MathNet.Numerics.LinearAlgebra.Storage
                     j++;
                 }
 
+                return true;
+            }
+            else if(other is DenseVectorStorage<T> denseOther)
+            {
+                int i = 0;
+                foreach(var otherValue in denseOther.Data)
+                {
+                    if (!At(i).Equals(otherValue))
+                    {
+                        return false;
+                    }
+                }
                 return true;
             }
 

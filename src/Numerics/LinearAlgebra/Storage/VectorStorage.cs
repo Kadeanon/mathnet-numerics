@@ -109,7 +109,7 @@ namespace MathNet.Numerics.LinearAlgebra.Storage
         /// <returns>
         /// <c>true</c> if the current object is equal to the <paramref name="other"/> parameter; otherwise, <c>false</c>.
         /// </returns>
-        public virtual bool Equals(VectorStorage<T> other)
+        public virtual bool Equals(VectorStorage<T>? other)
         {
             // Reject equality when the argument is null or has a different shape.
             if (other == null)
@@ -127,15 +127,18 @@ namespace MathNet.Numerics.LinearAlgebra.Storage
                 return true;
             }
 
-            // If all else fails, perform element wise comparison.
-            for (var index = 0; index < Length; index++)
+            return SenquentialEquals(other);
+        }
+
+        protected virtual bool SenquentialEqualsUnchecked(VectorStorage<T> other)
+        {
+            for (int i = 0; i < Length; i++)
             {
-                if (!At(index).Equals(other.At(index)))
+                if (!At(i).Equals(other.At(i)))
                 {
                     return false;
                 }
             }
-
             return true;
         }
 
@@ -146,7 +149,7 @@ namespace MathNet.Numerics.LinearAlgebra.Storage
         /// true if the specified <see cref="T:System.Object"/> is equal to the current <see cref="T:System.Object"/>; otherwise, false.
         /// </returns>
         /// <param name="obj">The <see cref="T:System.Object"/> to compare with the current <see cref="T:System.Object"/>. </param>
-        public sealed override bool Equals(object obj)
+        public sealed override bool Equals(object? obj)
         {
             return Equals(obj as VectorStorage<T>);
         }

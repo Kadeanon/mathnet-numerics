@@ -771,5 +771,37 @@ namespace MathNet.Numerics.LinearAlgebra.Storage
 
             return base.Fold2Unchecked(other, f, state, zeros);
         }
+
+        // Equals
+
+        protected override bool SenquentialEqualsUnchecked(VectorStorage<T> other)
+        {
+            if(other is DenseVectorStorage<T> denseOther)
+            {
+                int i = 0;
+                foreach(var value in denseOther.Data)
+                {
+                    if (!Data[i].Equals(value))
+                    {
+                        return false;
+                    }
+                    i++;
+                }
+            }
+            else
+            {
+                int i = 0;
+                foreach (var value in other.Enumerate())
+                {
+                    if (!Data[i].Equals(value))
+                    {
+                        return false;
+                    }
+                    i++;
+                }
+            }
+
+            return true;
+        }
     }
 }
